@@ -52,18 +52,28 @@ class Filelist:
         # flatten category list
         categories = [c for cat in categories for c in cat]
 
+        # later categories take precedence over earlier ones
+        cat_priority = {c: i for i, c in enumerate(categories)}
+
         files = {}
+        file_priority = {}
         for path in self.files:
             for group in self.files[path]:
                 cat_list = group['categories']
-                if set(categories) & set(cat_list):
-                    if path in files:
+                matching = set(categories) & set(cat_list)
+                if matching:
+                    priority = max(cat_priority[c] for c in matching)
+                    if path not in files:
+                        files[path] = group
+                        file_priority[path] = priority
+                    elif priority > file_priority[path]:
+                        files[path] = group
+                        file_priority[path] = priority
+                    elif priority == file_priority[path]:
                         logging.error('multiple category lists active for '
                                       f'{path}: {files[path]["categories"]} '
                                       f'and {cat_list}')
                         raise RuntimeError
-                    else:
-                        files[path] = group
 
         return files
 

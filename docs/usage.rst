@@ -23,6 +23,9 @@ When you run dotgit all the files in the filelist that are not part of the
 active categories will be ignored. You can run dotgit with two verbose flags
 ``-vv`` to see what categories are currently active.
 
+In case you try to restore a group which contains a file that is tagged by
+multiple categories, the latest category in the list takes precedence.
+
 Flags
 =====
 

@@ -121,6 +121,116 @@ class TestFilelist:
         with pytest.raises(RuntimeError):
             flist.activate(['cat2'])
 
+    def test_arbitration_group_later_wins(self, tmp_path):
+        """Later category in group takes precedence over earlier."""
+        # group defines order: common(0), alias(1), zsh(2), vim(3)
+        fname = self.write_flist(tmp_path,
+                                 'myhost=common,alias,zsh,vim\n'
+                                 '.vimrc\n'          # common (index 0)
+                                 '.vimrc:vim\n')     # vim (index 3)
+
+        flist = Filelist(fname)
+        # simulates `dotgit restore` on myhost: ['common', 'myhost']
+        # expands to ['common', 'common', 'alias', 'zsh', 'vim', 'myhost']
+        # vim (index 4) > common (index 1), so vim version wins
+        result = flist.activate(['common', 'myhost'])
+        assert result == {
+            '.vimrc': {
+                'categories': ['vim'],
+                'plugin': 'plain',
+            }}
+
+    def test_arbitration_group_common_fallback(self, tmp_path):
+        """On a different host, only common matches as fallback."""
+        fname = self.write_flist(tmp_path,
+                                 'myhost=common,alias,zsh,vim\n'
+                                 '.profile\n'           # common
+                                 '.profile:vim\n')      # vim — only in myhost group
+
+        flist = Filelist(fname)
+        # on 'otherhost' (no group defined), categories stay ['common', 'otherhost']
+        # 'vim' is not in the active set, so only common matches
+        result = flist.activate(['common', 'otherhost'])
+        assert result == {
+            '.profile': {
+                'categories': ['common'],
+                'plugin': 'plain',
+            }}
+
+    def test_arbitration_group_order_matters(self, tmp_path):
+        """Position inside group determines which category wins the file."""
+        # alias is before zsh in the group, so zsh has higher priority
+        fname = self.write_flist(tmp_path,
+                                 'myhost=alias,zsh\n'
+                                 '.config:alias\n'
+                                 '.config:zsh\n')
+
+        flist = Filelist(fname)
+        result = flist.activate(['common', 'myhost'])
+        # flattened: ['common', 'alias', 'zsh', 'myhost']
+        # zsh (index 2) > alias (index 1) → zsh wins
+        assert result == {
+            '.config': {
+                'categories': ['zsh'],
+                'plugin': 'plain',
+            }}
+
+    def test_arbitration_group_filelist_entry_order_irrelevant(self, tmp_path):
+        """Order of entries in filelist doesn't matter; group order does."""
+        # specific entry listed BEFORE common entry in filelist
+        fname = self.write_flist(tmp_path,
+                                 'myhost=common,zsh\n'
+                                 '.zshrc:zsh\n'
+                                 '.zshrc\n')
+
+        flist = Filelist(fname)
+        result = flist.activate(['common', 'myhost'])
+        # flattened: ['common', 'common', 'zsh', 'myhost']
+        # zsh (index 2) > common (index 1) → zsh wins regardless of filelist order
+        assert result == {
+            '.zshrc': {
+                'categories': ['zsh'],
+                'plugin': 'plain',
+            }}
+
+    def test_arbitration_group_with_plugin(self, tmp_path):
+        """Arbitration works correctly with non-default plugins."""
+        fname = self.write_flist(tmp_path,
+                                 'myhost=common,ssh\n'
+                                 '.ssh/config|encrypt\n'
+                                 '.ssh/config:ssh|encrypt\n')
+
+        flist = Filelist(fname)
+        result = flist.activate(['common', 'myhost'])
+        assert result == {
+            '.ssh/config': {
+                'categories': ['ssh'],
+                'plugin': 'encrypt',
+            }}
+
+    def test_arbitration_group_no_match(self, tmp_path):
+        """File with category not in any active group is excluded."""
+        fname = self.write_flist(tmp_path,
+                                 'myhost=alias,zsh\n'
+                                 '.profile:vim\n')
+
+        flist = Filelist(fname)
+        # vim is not in the myhost group, and not in ['common', 'myhost']
+        result = flist.activate(['common', 'myhost'])
+        assert result == {}
+
+    def test_arbitration_group_equal_priority_raises(self, tmp_path):
+        """Two entries matching the same highest-priority category is an error."""
+        fname = self.write_flist(tmp_path,
+                                 'myhost=alias,zsh\n'
+                                 'file:alias,zsh\n'    # matches zsh (highest)
+                                 'file:zsh\n')         # also matches zsh
+
+        flist = Filelist(fname)
+        # both entries have max priority from 'zsh' → ambiguous
+        with pytest.raises(RuntimeError):
+            flist.activate(['common', 'myhost'])
+
     def test_manifest(self, tmp_path):
         fname = self.write_flist(tmp_path,
                                  'group=cat1,cat2\ncfile\nnfile:cat1,cat2\n'
